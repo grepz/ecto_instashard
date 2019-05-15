@@ -19,9 +19,11 @@ defmodule Ecto.InstaShard.Sharding do
     Module.concat([base, "#{name}#{position}"])
   end
 
-  def do_create_module(%{position: position, table: table, app_name: app_name, module: module}) do
+  def do_create_module(%{position: position, table: table, app_name: app_name, module: module, adapter: adapter}) do
     Module.create(module, quote do
-      use Ecto.Repo, otp_app: unquote(app_name)
+      use Ecto.Repo,
+        otp_app: unquote(app_name),
+        adapter: unquote(adapter)
 
       def check_tables_exists(pos \\ unquote(position), table \\ unquote(table)) do
         result = run("SELECT EXISTS (

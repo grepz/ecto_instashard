@@ -8,22 +8,18 @@ defmodule Ecto.InstaShard.Sharding.Setup do
       import Ecto.Query
 
       @app_name unquote(config[:app_name])
+      @config_key unquote(config[:config_key])
 
-      @setup Application.get_env(@app_name, unquote(config[:config_key])) || [
-        count: 0
-      ]
-
-      unless @setup do
-        raise "Config #{unquote(config[:config_key])} can't be nil"
+      def setup(key) do
+        Application.get_env(@app_name, @config_key)[key]
       end
 
       @base_module_name unquote(config[:base_module_name])
-      @mapping @setup[:mapping]
       @repository_name unquote(config[:name])
       @table_name unquote(config[:table])
 
       def include_repository_supervisor(children) do
-        count = setup_key(:count)
+        count = setup(:count)
 
         if count && count > 0 do
           import Supervisor.Spec, warn: false
@@ -40,27 +36,30 @@ defmodule Ecto.InstaShard.Sharding.Setup do
 
       end
 
-      def setup_key(key), do: @setup[key]
-
       def repositories_to_load do
-        for n <- 0..__MODULE__.setup_key(:count) - 1 do
+        for n <- 0..__MODULE__.setup(:count) - 1 do
           __MODULE__.create_repository_module(n)
         end
       end
 
-      def logical_to_physical(logical) when logical < @mapping, do: 0
-      def logical_to_physical(logical), do: round(Float.floor(logical / @mapping))
+      def logical_to_physical(logical) do
+        case logical < setup(:mapping) do
+          true -> 0
+          false -> round(Float.floor(logical / setup(:mapping)))
+        end
+      end
 
       def create_repository_module(position) do
-        if logical_to_physical(@setup[:logical_shards] - 1) >= @setup[:count] do
-          raise "#{unquote(config[:config_key])}.mapping (#{@mapping}) leads to a mapping higher than the amount of avaialble physical databases (#{@setup[:count]})"
+        if logical_to_physical(setup(:logical_shards) - 1) >= setup(:count) do
+          raise "#{unquote(config[:config_key])}.mapping (#{setup(:mapping)}) leads to a mapping higher than the amount of avaialble physical databases (#{setup(:count)})"
         end
 
-        db = Enum.at(@setup[:databases], position)
+        db = Enum.at(setup(:databases), position)
+        adapter = db[:adapter]
         mod = repository_module(position)
         Application.put_env(@app_name, mod, db)
 
-        Ecto.InstaShard.Sharding.create_repository_module(%{position: position, table: @table_name, app_name: @app_name, module: mod})
+        Ecto.InstaShard.Sharding.create_repository_module(%{position: position, table: @table_name, app_name: @app_name, adapter: adapter, module: mod})
 
         ecto_repos = Application.get_env(@app_name, :ecto_repos)
         Application.put_env(@app_name, :ecto_repos, ecto_repos ++ [mod])
@@ -88,14 +87,14 @@ defmodule Ecto.InstaShard.Sharding.Setup do
       end
 
       def run_all_shards(run) do
-        for n <- 0..@setup[:logical_shards] - 1 do
+        for n <- 0..setup(:logical_shards) - 1 do
           mod = repository_module(logical_to_physical(n))
           run.(n, mod)
         end
       end
 
       def shard(user_id) do
-        rem(Ecto.InstaShard.Sharding.Hashing.item_hash(user_id), @setup[:logical_shards])
+        rem(Ecto.InstaShard.Sharding.Hashing.item_hash(user_id), setup(:logical_shards))
       end
 
       def shard_name(user_id), do: "shard#{shard(user_id)}"
